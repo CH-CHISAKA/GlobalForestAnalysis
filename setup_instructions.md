@@ -47,6 +47,10 @@ python3 --version
     ```shell
     python -m venv .venv
     ```
+    or
+    ```shell
+    python3 -m venv .venv
+    ```
 
       **Part B**
 
@@ -103,6 +107,10 @@ python3 --version
 
    ```shell
    pip install -r requirements.txt
+   ```
+
+   ``` shell
+   python3 -m pip install -r requirements.txt
    ```
 
 
