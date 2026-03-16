@@ -1,0 +1,48 @@
+{
+  "pipeline_name": "global_forest_analytics_pipeline",
+  "exported_at": "2026-03-16T01:59:21.153527Z",
+  "dataset_root": "dataset",
+  "forecast_horizon_years": 5,
+  "trend_model_type": "linear_regression_per_entity",
+  "ranking_method": "composite_score",
+  "primary_join_key_country": [
+    "iso",
+    "country_name"
+  ],
+  "explainability": {
+    "trend_level": [
+      "loss_slope_ha_per_year",
+      "intercept",
+      "r_squared",
+      "trend_direction"
+    ],
+    "forecast_level": [
+      "latest_actual_annual_loss_ha",
+      "avg_forecast_annual_loss_ha",
+      "max_forecast_annual_loss_ha",
+      "forecast_risk_label"
+    ],
+    "ranking_level": [
+      "score_slope",
+      "score_latest_loss",
+      "score_avg_forecast",
+      "score_max_forecast",
+      "score_forecast_ratio",
+      "score_risk_label",
+      "country_risk_score",
+      "country_improvement_score",
+      "explanation"
+    ]
+  },
+  "assets": [
+    "canonical_country_table",
+    "country_year_features",
+    "region_aggregates",
+    "trend_summary",
+    "forecasts",
+    "top_at_risk_countries",
+    "top_improving_countries",
+    "top_worsening_subregions",
+    "continent_watchlists"
+  ]
+}

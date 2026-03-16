@@ -11,3 +11,7 @@ matplotlib-inline
 seaborn
 pycountry-convert
 tk
+torch
+torchvision
+torchaudio
+orjson
