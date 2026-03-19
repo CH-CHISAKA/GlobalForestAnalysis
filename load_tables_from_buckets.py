@@ -22,6 +22,10 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 JSON_BUCKET = "forest-json"
 STORAGE_VERSION = "v1"
 
+# GeoJSON file paths (adjust if needed)
+CUSTOM_GEO_PATH = "dataset/custom.geo.json"
+COUNTRIES_GEO_PATH = "dataset/countries.geojson"
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 FILE_MAP = {
@@ -38,13 +42,22 @@ FILE_MAP = {
     "country_rankings": f"{STORAGE_VERSION}/country_rankings.json",
 }
 
+# Check if geopandas is available
+try:
+    import geopandas as gpd
+    from shapely.geometry import shape, Point
+    HAS_GEOPANDAS = True
+except ImportError:
+    print("⚠️ Warning: geopandas or shapely not installed. GeoJSON processing will be disabled.")
+    print("Install with: pip install geopandas shapely")
+    HAS_GEOPANDAS = False
+
 # =========================================================
 # HELPERS
 # =========================================================
 def chunked(rows: List[Dict[str, Any]], size: int = 500) -> Iterable[List[Dict[str, Any]]]:
     for i in range(0, len(rows), size):
         yield rows[i:i + size]
-
 
 def download_json_from_storage(bucket: str, path: str) -> Any:
     print(f"Downloading {bucket}/{path} ...")
@@ -58,14 +71,12 @@ def download_json_from_storage(bucket: str, path: str) -> Any:
         raise ValueError(f"{bucket}/{path} must contain a JSON array or object")
     return data
 
-
 def safe_download(bucket: str, path: str, label: str) -> Optional[Any]:
     try:
         return download_json_from_storage(bucket, path)
     except Exception as e:
         print(f"Skipping {label}: {e}")
         return None
-
 
 def upsert_rows(table_name: str, rows: List[Dict[str, Any]], on_conflict: str, batch_size: int = 500) -> None:
     if not rows:
@@ -80,10 +91,8 @@ def upsert_rows(table_name: str, rows: List[Dict[str, Any]], on_conflict: str, b
 
     print(f"Finished loading {table_name}")
 
-
 def extract_iso_set(rows: List[Dict[str, Any]]) -> Set[str]:
     return {str(r["iso"]).strip().upper() for r in rows if r.get("iso")}
-
 
 def filter_rows_by_valid_iso(
     rows: List[Dict[str, Any]],
@@ -115,7 +124,6 @@ def filter_rows_by_valid_iso(
     print(f"{table_name}: kept {len(kept)}/{len(rows)} rows after ISO validation")
     return kept
 
-
 def _to_float(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -125,7 +133,6 @@ def _to_float(value: Any) -> Optional[float]:
         return float(str(value))
     except Exception:
         return None
-
 
 def _to_int(value: Any) -> Optional[int]:
     if value is None:
@@ -139,7 +146,6 @@ def _to_int(value: Any) -> Optional[int]:
     except Exception:
         return None
 
-
 def dedupe_by_keys(rows: List[Dict[str, Any]], keys: List[str]) -> List[Dict[str, Any]]:
     seen = {}
     for row in rows:
@@ -147,6 +153,158 @@ def dedupe_by_keys(rows: List[Dict[str, Any]], keys: List[str]) -> List[Dict[str
         seen[key] = row
     return list(seen.values())
 
+# =========================================================
+# GEOJSON PROCESSING FUNCTIONS
+# =========================================================
+def load_geojson_from_file(filepath: str) -> Optional[Dict]:
+    """Load GeoJSON from a local file."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"⚠️ GeoJSON file not found: {filepath}")
+        return None
+    except Exception as e:
+        print(f"Error loading GeoJSON from {filepath}: {e}")
+        return None
+
+def extract_centroid_from_geometry(geometry: Dict) -> Optional[Dict[str, float]]:
+    """
+    Extract centroid from a GeoJSON geometry.
+    Returns {'latitude': lat, 'longitude': lon} or None.
+    """
+    try:
+        # Create shapely geometry from GeoJSON
+        geom = shape(geometry)
+        
+        # Get centroid
+        centroid = geom.centroid
+        
+        return {
+            'latitude': centroid.y,
+            'longitude': centroid.x
+        }
+    except Exception as e:
+        print(f"Error extracting centroid: {e}")
+        return None
+
+def process_country_geojson(geojson_data: Dict, source_name: str) -> List[Dict[str, Any]]:
+    """
+    Process country GeoJSON and extract centroids for each country.
+    Returns list of country geo point records.
+    """
+    features = geojson_data.get('features', [])
+    country_points = []
+    
+    for feature in features:
+        props = feature.get('properties', {})
+        geometry = feature.get('geometry')
+        
+        if not geometry:
+            continue
+        
+        # Extract ISO codes (try multiple possible field names)
+        iso = (
+            props.get('ISO3166-1-Alpha-3') or 
+            props.get('iso_a3') or 
+            props.get('ISO3') or 
+            props.get('iso3') or
+            props.get('ISO3166-1-Alpha-2') or
+            props.get('iso_a2') or
+            props.get('ISO2') or
+            props.get('iso2')
+        )
+        
+        # Get country name
+        country_name = (
+            props.get('name') or 
+            props.get('NAME') or 
+            props.get('NAME_EN') or
+            props.get('NAME_LONG') or
+            props.get('NAME_ENG') or
+            props.get('admin')
+        )
+        
+        # Get continent and subregion if available
+        continent = props.get('continent') or props.get('CONTINENT')
+        subregion = props.get('subregion') or props.get('SUBREGION')
+        
+        if not iso or not country_name:
+            continue
+        
+        # Clean ISO
+        iso_clean = str(iso).strip().upper()
+        
+        # Extract centroid
+        centroid = extract_centroid_from_geometry(geometry)
+        
+        if centroid:
+            country_points.append({
+                'iso': iso_clean,
+                'country_name': country_name,
+                'continent': continent,
+                'subregion': subregion,
+                'latitude': centroid['latitude'],
+                'longitude': centroid['longitude']
+            })
+        else:
+            print(f"  Could not extract centroid for {country_name} ({iso_clean})")
+    
+    print(f"✅ Processed {len(country_points)} countries from {source_name}")
+    return country_points
+
+def merge_country_geo_points(geo_points_list: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    Merge multiple geo point sources, preferring first occurrence.
+    """
+    merged = {}
+    
+    for geo_points in geo_points_list:
+        for point in geo_points:
+            iso = point['iso']
+            if iso not in merged:
+                merged[iso] = point
+    
+    return list(merged.values())
+
+def normalize_country_geo_points(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize country geo points for database insertion."""
+    normalized = []
+    for r in rows:
+        normalized.append({
+            'iso': r['iso'],
+            'country_name': r['country_name'],
+            'continent': r.get('continent'),
+            'subregion': r.get('subregion'),
+            'latitude': _to_float(r.get('latitude')),
+            'longitude': _to_float(r.get('longitude'))
+        })
+    return normalized
+
+def get_country_iso_mapping(canonical_rows: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Create mapping from ISO to country name from canonical table."""
+    return {r['iso']: r['country_name'] for r in canonical_rows}
+
+def ensure_country_geo_points_table():
+    """Check if the country_geo_points table exists."""
+    try:
+        supabase.table("country_geo_points").select("iso").limit(1).execute()
+        print("✅ country_geo_points table already exists")
+        return True
+    except Exception as e:
+        print("❌ country_geo_points table does not exist or is not accessible")
+        print("Please create the table in Supabase SQL editor with:")
+        print("""
+        create table if not exists public.country_geo_points (
+          iso text primary key,
+          country_name text,
+          continent text,
+          subregion text,
+          latitude double precision,
+          longitude double precision
+        );
+        """)
+        return False
 
 # =========================================================
 # NORMALIZERS
@@ -168,7 +326,6 @@ def normalize_canonical_country_table(rows: List[Dict[str, Any]]) -> List[Dict[s
         )
     return normalized
 
-
 def normalize_country_year_features(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for r in rows:
@@ -188,7 +345,6 @@ def normalize_country_year_features(rows: List[Dict[str, Any]]) -> List[Dict[str
         )
     return normalized
 
-
 def normalize_trend_summary_country(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for r in rows:
@@ -205,7 +361,6 @@ def normalize_trend_summary_country(rows: List[Dict[str, Any]]) -> List[Dict[str
             }
         )
     return normalized
-
 
 def normalize_forecasts_country(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     grouped: Dict[str, List[Dict[str, Any]]] = {}
@@ -293,7 +448,6 @@ def normalize_forecasts_country(rows: List[Dict[str, Any]]) -> List[Dict[str, An
 
     return normalized
 
-
 def normalize_country_rankings(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
 
@@ -320,7 +474,6 @@ def normalize_country_rankings(rows: List[Dict[str, Any]]) -> List[Dict[str, Any
 
     return dedupe_by_keys(normalized, ["iso"])
 
-
 def normalize_region_aggregates(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for r in rows:
@@ -338,7 +491,6 @@ def normalize_region_aggregates(rows: List[Dict[str, Any]]) -> List[Dict[str, An
             }
         )
     return normalized
-
 
 def normalize_top_at_risk_countries(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
@@ -378,7 +530,6 @@ def normalize_top_at_risk_countries(rows: List[Dict[str, Any]]) -> List[Dict[str
         )
     return dedupe_by_keys(normalized, ["iso"])
 
-
 def normalize_top_improving_countries(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for r in rows:
@@ -403,7 +554,6 @@ def normalize_top_improving_countries(rows: List[Dict[str, Any]]) -> List[Dict[s
         )
     return dedupe_by_keys(normalized, ["iso"])
 
-
 def normalize_top_worsening_subregions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for r in rows:
@@ -422,7 +572,6 @@ def normalize_top_worsening_subregions(rows: List[Dict[str, Any]]) -> List[Dict[
         )
     return dedupe_by_keys(normalized, ["subregion"])
 
-
 def normalize_continent_watchlists(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalized = []
     for r in rows:
@@ -440,7 +589,6 @@ def normalize_continent_watchlists(rows: List[Dict[str, Any]]) -> List[Dict[str,
             }
         )
     return dedupe_by_keys(normalized, ["continent"])
-
 
 # =========================================================
 # BUILD country_rankings FROM ranking exports
@@ -506,12 +654,19 @@ def build_country_rankings_from_rank_exports(
 
     return list(by_iso.values())
 
-
 # =========================================================
 # MAIN
 # =========================================================
 def main():
-    # Core
+    print("🚀 Starting Supabase data pipeline...")
+    
+    # Check if country_geo_points table exists
+    table_exists = ensure_country_geo_points_table()
+    if not table_exists:
+        print("⚠️ Please create the country_geo_points table first, then run again.")
+        return
+    
+    # Core data downloads
     canonical_raw = safe_download(JSON_BUCKET, FILE_MAP["canonical_country_table"], "canonical_country_table")
     country_year_raw = safe_download(JSON_BUCKET, FILE_MAP["country_year_features"], "country_year_features")
     trend_raw = safe_download(JSON_BUCKET, FILE_MAP["trend_summary_country"], "trend_summary_country")
@@ -528,7 +683,7 @@ def main():
 
     if not canonical_raw:
         raise ValueError("canonical_country_table.json is required")
-
+    
     canonical_rows = normalize_canonical_country_table(canonical_raw)
     country_year_rows = normalize_country_year_features(country_year_raw or [])
     trend_rows = normalize_trend_summary_country(trend_raw or [])
@@ -562,9 +717,72 @@ def main():
         if ranking_rows:
             print("Built country_rankings from ranking exports")
 
-    valid_isos = extract_iso_set(canonical_rows)
-    print(f"canonical_country_table valid ISO count: {len(valid_isos)}")
+    # =========================================================
+    # PROCESS GEOJSON FILES
+    # =========================================================
+    country_geo_points_rows = []
+    
+    if HAS_GEOPANDAS:
+        print("\n📂 Processing GeoJSON files...")
+        
+        # Load and process custom.geo.json
+        if os.path.exists(CUSTOM_GEO_PATH):
+            custom_geo = load_geojson_from_file(CUSTOM_GEO_PATH)
+            if custom_geo:
+                custom_points = process_country_geojson(custom_geo, "custom.geo.json")
+                country_geo_points_rows.extend(custom_points)
+        else:
+            print(f"⚠️ custom.geo.json not found at {CUSTOM_GEO_PATH}")
+        
+        # Load and process countries.geojson
+        if os.path.exists(COUNTRIES_GEO_PATH):
+            countries_geo = load_geojson_from_file(COUNTRIES_GEO_PATH)
+            if countries_geo:
+                countries_points = process_country_geojson(countries_geo, "countries.geojson")
+                country_geo_points_rows.extend(countries_points)
+        else:
+            print(f"⚠️ countries.geojson not found at {COUNTRIES_GEO_PATH}")
+        
+        # Merge points (prioritize first file over second if duplicates)
+        if country_geo_points_rows:
+            original_count = len(country_geo_points_rows)
+            country_geo_points_rows = merge_country_geo_points([country_geo_points_rows])
+            print(f"🔄 Merged from {original_count} to {len(country_geo_points_rows)} unique country geo points")
+            
+            # Create ISO to country name mapping from canonical table
+            iso_to_name = get_country_iso_mapping(canonical_rows)
+            
+            # Filter to only ISOs that exist in canonical table
+            valid_isos = extract_iso_set(canonical_rows)
+            before_filter = len(country_geo_points_rows)
+            country_geo_points_rows = [
+                p for p in country_geo_points_rows 
+                if p['iso'] in valid_isos
+            ]
+            print(f"🔍 Filtered from {before_filter} to {len(country_geo_points_rows)} geo points with valid ISOs")
+            
+            # Fill missing country names from canonical table
+            filled_count = 0
+            for point in country_geo_points_rows:
+                if not point.get('country_name') and point['iso'] in iso_to_name:
+                    point['country_name'] = iso_to_name[point['iso']]
+                    filled_count += 1
+            
+            if filled_count:
+                print(f"📝 Filled {filled_count} missing country names from canonical table")
+            
+            # Normalize for database
+            country_geo_points_rows = normalize_country_geo_points(country_geo_points_rows)
+        else:
+            print("⚠️ No valid country geo points found in GeoJSON files")
+    else:
+        print("⚠️ Skipping GeoJSON processing - geopandas/shapely not installed")
 
+    # Get valid ISOs from canonical table
+    valid_isos = extract_iso_set(canonical_rows)
+    print(f"\n📊 canonical_country_table valid ISO count: {len(valid_isos)}")
+
+    # Filter all data by valid ISOs
     country_year_rows = filter_rows_by_valid_iso(country_year_rows, valid_isos, "country_year_features")
     trend_rows = filter_rows_by_valid_iso(trend_rows, valid_isos, "trend_summary_country")
     forecast_rows = filter_rows_by_valid_iso(forecast_rows, valid_isos, "forecasts_country")
@@ -573,7 +791,16 @@ def main():
     top_improving_rows = filter_rows_by_valid_iso(top_improving_rows, valid_isos, "top_improving_countries")
 
     # Load in dependency order
+    print("\n💾 Loading data into Supabase...")
+    
     upsert_rows("canonical_country_table", canonical_rows, on_conflict="iso")
+    
+    # Load country geo points (new table)
+    if country_geo_points_rows:
+        upsert_rows("country_geo_points", country_geo_points_rows, on_conflict="iso")
+    else:
+        print("Skipping country_geo_points: no rows to insert")
+    
     upsert_rows("country_year_features", country_year_rows, on_conflict="iso,year")
     upsert_rows("trend_summary_country", trend_rows, on_conflict="iso")
     upsert_rows("forecasts_country", forecast_rows, on_conflict="iso")
@@ -586,8 +813,7 @@ def main():
     upsert_rows("top_worsening_subregions", top_worsening_subregions_rows, on_conflict="subregion")
     upsert_rows("continent_watchlists", continent_watchlists_rows, on_conflict="continent")
 
-    print("Done loading Supabase tables.")
-
+    print("\n✅ Done loading Supabase tables.")
 
 if __name__ == "__main__":
     main()

@@ -15,4 +15,8 @@ torch
 torchvision
 torchaudio
 orjson
+streamlit
+pydeck
+geopandas
+shapely
 supabase
