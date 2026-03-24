@@ -1,2 +1,12 @@
 .env
 dataset.zip
+
+
+# Large data files
+*.tif
+*.pt
+
+# Or more specific:
+dataset/
+rf_detr_model/*.pt
+rf_detr_model/weights_clean.pt
