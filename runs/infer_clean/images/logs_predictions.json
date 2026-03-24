@@ -1,0 +1,16 @@
+{
+  "source": "runs/test/logs.jpeg",
+  "predictions": [
+    {
+      "class_id": 11,
+      "class_name": "wildlife_animal",
+      "confidence": 0.43512529134750366,
+      "bbox_xyxy": [
+        1.2272619009017944,
+        47.2393798828125,
+        235.09295654296875,
+        162.13555908203125
+      ]
+    }
+  ]
+}

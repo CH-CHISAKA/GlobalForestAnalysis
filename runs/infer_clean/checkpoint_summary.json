@@ -1,0 +1,29 @@
+{
+  "checkpoint_path": "rf_detr_model/weights_clean.pt",
+  "checkpoint_format": "wrapped_state_dict",
+  "inferred_model_size": "medium",
+  "inferred_model_class": "RFDETRMedium",
+  "inferred_resolution": 576,
+  "num_classes": 13,
+  "class_names": [
+    "bird",
+    "chainsaw",
+    "cut_tree_stump",
+    "domestic_animal",
+    "felled_trees",
+    "forest",
+    "illegal_logger",
+    "logs",
+    "machete",
+    "person",
+    "unauthorised_logging_truck",
+    "wildlife_animal"
+  ],
+  "class_head_outputs": 14,
+  "total_parameters": 33410412,
+  "has_args": true,
+  "has_model_key": true,
+  "notes": [
+    "Metadata mismatch: num_classes=13 but class_names has 12 entries."
+  ]
+}

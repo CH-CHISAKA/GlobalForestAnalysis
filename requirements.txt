@@ -1,3 +1,4 @@
+# Data processing and analysis
 pandas
 numpy
 scikit-learn
@@ -6,17 +7,40 @@ statsmodels
 pyyaml
 joblib
 pyarrow
+
+# Visualization
 matplotlib
 matplotlib-inline
 seaborn
+pydeck
+
+# Country/geography handling
 pycountry-convert
+geopandas
+shapely
+
+# For raster data handling
+# This is a common library for working with geospatial raster data, which is likely relevant for handling the TIF files mentioned in the .env file. 
+rasterio
+
+# GUI (Tkinter)
 tk
+
+# Deep learning (PyTorch)
 torch
 torchvision
 torchaudio
+
+# Serialization / API
 orjson
-streamlit
-pydeck
-geopandas
-shapely
 supabase
+
+# Web apps
+streamlit
+
+# 
+rfdetr_plus
+
+
+# GitHub package
+git+https://github.com/roboflow/rf-detr.git
