@@ -35,7 +35,7 @@ class Settings:
     batch_size: int = 500
     upload_enabled: bool = True
     save_local_csv: bool = True
-    output_csv_path: str = "forest_loss_output_driver/forest_loss_driver_country_summary.csv"
+    output_csv_path: str = "forest_loss_output/forest_loss_driver_country_summary.csv"
 
 
 def load_settings() -> Settings:
@@ -65,7 +65,7 @@ def load_settings() -> Settings:
         save_local_csv=os.getenv("SAVE_LOCAL_CSV", "true").lower() == "true",
         output_csv_path=os.getenv(
             "OUTPUT_CSV_PATH",
-            "forest_loss_output_driver/forest_loss_driver_country_summary.csv",
+            "forest_loss_output/forest_loss_driver_country_summary.csv",
         ),
     )
 
